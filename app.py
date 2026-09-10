@@ -13,8 +13,8 @@ MONTH_NAMES = {
     9: "SEPTEMBER", 10: "OCTOBER", 11: "NOVEMBER", 12: "DECEMBER"
 }
 
-def safe_parse_date(date_str):
-    """તારીખ ગમે તેવા ફોર્મેટમાં હોય તો પણ એરર વગર સોર્ટ કરી આપે છે."""
+def normalize_date(date_str):
+    """તારીખ ગમે તે રીતે લખી હોય (01-09, 1/9, 1-9-26), તેને સ્ટાન્ડર્ડ DD-MM-YYYY બનાવી દેશે."""
     clean_d = str(date_str).strip().replace("/", "-")
     parts = clean_d.split("-")
     if len(parts) == 3:
@@ -24,7 +24,17 @@ def safe_parse_date(date_str):
             y = int(parts[2])
             if y < 100:
                 y += 2000
-            return datetime(y, m, d)
+            return f"{str(d).zfill(2)}-{str(m).zfill(2)}-{y}"
+        except Exception:
+            pass
+    return clean_d
+
+def parse_date_obj(date_str):
+    clean_d = normalize_date(date_str)
+    parts = clean_d.split("-")
+    if len(parts) == 3:
+        try:
+            return datetime(int(parts[2]), int(parts[1]), int(parts[0]))
         except Exception:
             pass
     return datetime(2099, 1, 1)
@@ -41,17 +51,10 @@ def parse_raw_text(text):
 
     entries = []
     for m in pattern.finditer(text):
-        p_date = m.group("date").strip().replace("/", "-")
-        date_parts = p_date.split("-")
-        if len(date_parts) == 3:
-            formatted_date = f"{date_parts[0].zfill(2)}-{date_parts[1].zfill(2)}-{date_parts[2]}"
-        else:
-            formatted_date = p_date
-
         entries.append({
             "Project": m.group("project").strip().upper(),
             "Employee": m.group("employee").strip().upper(),
-            "Date": formatted_date,
+            "Date": normalize_date(m.group("date")),
             "Scan File": int(m.group("files").strip()),
             "Scan Page": int(m.group("pages").strip()),
         })
@@ -68,17 +71,10 @@ def parse_raw_text(text):
         for m in alt_pattern.finditer(text):
             emp = m.group("employee")
             emp = emp.strip().upper() if emp else "UNKNOWN"
-            p_date = m.group("date").strip().replace("/", "-")
-            date_parts = p_date.split("-")
-            if len(date_parts) == 3:
-                formatted_date = f"{date_parts[0].zfill(2)}-{date_parts[1].zfill(2)}-{date_parts[2]}"
-            else:
-                formatted_date = p_date
-
             entries.append({
                 "Project": m.group("project").strip().upper(),
                 "Employee": emp,
-                "Date": formatted_date,
+                "Date": normalize_date(m.group("date")),
                 "Scan File": int(m.group("files").strip()),
                 "Scan Page": int(m.group("pages").strip()),
             })
@@ -90,7 +86,7 @@ def generate_project_filename(records):
         return "SCANNING_REPORT.xlsx"
 
     project_name = records[0]["Project"].replace(" ", "_")
-    parsed_dates = [safe_parse_date(r["Date"]) for r in records if safe_parse_date(r["Date"]).year != 2099]
+    parsed_dates = [parse_date_obj(r["Date"]) for r in records if parse_date_obj(r["Date"]).year != 2099]
 
     if not parsed_dates:
         return f"{project_name}_REPORT.xlsx"
@@ -104,11 +100,9 @@ def generate_project_filename(records):
 
     years = sorted(list(set(d.year for d in parsed_dates)))
     year_str = "-".join(str(y) for y in years)
-
     month_str = months_in_order[0] if len(months_in_order) == 1 else "-".join(months_in_order)
     return f"{project_name}_{month_str}_{year_str}.xlsx"
-
-def generate_excel_bytes(records):
+    def generate_excel_bytes(records):
     df = pd.DataFrame(records)
     wb = Workbook()
 
@@ -143,8 +137,7 @@ def generate_excel_bytes(records):
 
     fill_total = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
 
-    unique_dates = df["Date"].unique().tolist()
-    unique_dates.sort(key=safe_parse_date)
+    unique_dates = sorted(list(set(df["Date"].tolist())), key=parse_date_obj)
     employees = sorted(df["Employee"].unique().tolist())
 
     c_name = ws.cell(row=2, column=1, value="NAME")
@@ -156,7 +149,7 @@ def generate_excel_bytes(records):
     date_col_map = {}
     col_idx = 3
     for d_str in unique_dates:
-        d_obj = safe_parse_date(d_str)
+        d_obj = parse_date_obj(d_str)
         disp_date = f"{d_obj.day}/{d_obj.month}/{d_obj.year}" if d_obj.year != 2099 else d_str
         c = ws.cell(row=2, column=col_idx, value=disp_date)
         c.font = font_date
@@ -234,7 +227,8 @@ def generate_excel_bytes(records):
     wb.save(output_stream)
     output_stream.seek(0)
     return output_stream
-    # ==================== ૩. Streamlit Web Interface ====================
+
+# ==================== Streamlit Web App ====================
 st.set_page_config(page_title="Ajay Valiya Excel Data Entry", layout="wide", page_icon="📊")
 
 st.markdown("""
@@ -252,11 +246,12 @@ if uploaded_file and "file_loaded" not in st.session_state:
     try:
         df_old = pd.read_excel(uploaded_file, sheet_name="Master Data")
         for _, r in df_old.iterrows():
-            key = (str(r["Project"]).strip().upper(), str(r["Employee"]).strip().upper(), str(r["Date"]).strip())
+            d_norm = normalize_date(r["Date"])
+            key = (str(r["Project"]).strip().upper(), str(r["Employee"]).strip().upper(), d_norm)
             st.session_state.master_records[key] = {
                 "Project": str(r["Project"]).strip().upper(),
                 "Employee": str(r["Employee"]).strip().upper(),
-                "Date": str(r["Date"]).strip(),
+                "Date": d_norm,
                 "Scan File": int(r["Scan File"]),
                 "Scan Page": int(r["Scan Page"])
             }
@@ -265,7 +260,7 @@ if uploaded_file and "file_loaded" not in st.session_state:
     except Exception:
         st.sidebar.error("Master Data શીટ વાંચવામાં ભૂલ આવી.")
 
-raw_input = st.text_area("વોટ્સએપ રો ડેટા અહીં પેસ્ટ કરો:", height=250, placeholder="PROJECT NAME:- MANDAL\nEMPLOYEE NAME:- SHAIKH RAUF\nDATE:- 17-08-2026\nSCAN FILE:- 53\nSCAN PAGE:- 1102...")
+raw_input = st.text_area("વોટ્સએપ રો ડેટા અહીં પેસ્ટ કરો:", height=250, placeholder="PROJECT NAME:- VIRAMGAM\nEMPLOYEE NAME:- DANTANI POOJA\nDATE:- 01-09-2026\nSCAN FILE:- 56\nSCAN PAGE:- 1843...")
 
 if st.button("🚀 ડેટા પ્રોસેસ કરો", type="primary") and raw_input.strip():
     new_entries = parse_raw_text(raw_input)
