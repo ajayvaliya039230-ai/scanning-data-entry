@@ -101,7 +101,7 @@ def generate_project_filename(records):
     year_str = "-".join(str(y) for y in years)
     month_str = months_in_order[0] if len(months_in_order) == 1 else "-".join(months_in_order)
     return f"{project_name}_{month_str}_{year_str}.xlsx"
-    def generate_excel_bytes(records):
+def generate_excel_bytes(records):
     df = pd.DataFrame(records)
     wb = Workbook()
 
