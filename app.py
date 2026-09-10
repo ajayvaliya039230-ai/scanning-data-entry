@@ -7,16 +7,29 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-# મહિનાઓના અંગ્રેજી નામ
 MONTH_NAMES = {
     1: "JANUARY", 2: "FEBRUARY", 3: "MARCH", 4: "APRIL",
     5: "MAY", 6: "JUNE", 7: "JULY", 8: "AUGUST",
     9: "SEPTEMBER", 10: "OCTOBER", 11: "NOVEMBER", 12: "DECEMBER"
 }
 
-# ==================== ૧. ડેટા એક્સટ્રેક્શન ====================
+def safe_parse_date(date_str):
+    """તારીખ ગમે તેવા ફોર્મેટમાં હોય તો પણ એરર વગર સોર્ટ કરી આપે છે."""
+    clean_d = str(date_str).strip().replace("/", "-")
+    parts = clean_d.split("-")
+    if len(parts) == 3:
+        try:
+            d = int(parts[0])
+            m = int(parts[1])
+            y = int(parts[2])
+            if y < 100:
+                y += 2000
+            return datetime(y, m, d)
+        except Exception:
+            pass
+    return datetime(2099, 1, 1)
+
 def parse_raw_text(text):
-    """વોટ્સએપ ટેક્સ્ટમાંથી વિગતો એક્સટ્રેક્ટ કરે છે."""
     pattern = re.compile(
         r"PROJECT\s*(?:NAME)?\s*[:=-]+\s*(?P<project>[^\n\r]+)[\r\n]+"
         r"EMPLOYEE\s*(?:NAME)?\s*[:=-]+\s*(?P<employee>[^\n\r]+)[\r\n]+"
@@ -43,7 +56,6 @@ def parse_raw_text(text):
             "Scan Page": int(m.group("pages").strip()),
         })
 
-    # વૈકલ્પિક ફોર્મેટ
     if not entries:
         alt_pattern = re.compile(
             r"PROJECT\s*(?:NAME)?\s*[:=-]+\s*(?P<project>[^\n\r]+)[\r\n]+"
@@ -73,20 +85,12 @@ def parse_raw_text(text):
 
     return entries
 
-
 def generate_project_filename(records):
-    """પ્રોજેક્ટ નામ, મહિના અને વર્ષ મુજબ ફાઇલ નામ બનાવે છે."""
     if not records:
         return "SCANNING_REPORT.xlsx"
 
     project_name = records[0]["Project"].replace(" ", "_")
-    parsed_dates = []
-    for r in records:
-        try:
-            d = datetime.strptime(r["Date"], "%d-%m-%Y")
-            parsed_dates.append(d)
-        except Exception:
-            pass
+    parsed_dates = [safe_parse_date(r["Date"]) for r in records if safe_parse_date(r["Date"]).year != 2099]
 
     if not parsed_dates:
         return f"{project_name}_REPORT.xlsx"
@@ -104,21 +108,16 @@ def generate_project_filename(records):
     month_str = months_in_order[0] if len(months_in_order) == 1 else "-".join(months_in_order)
     return f"{project_name}_{month_str}_{year_str}.xlsx"
 
-
-# ==================== ૨. Excel મેટ્રિક્સ ફોર્મેટિંગ ====================
 def generate_excel_bytes(records):
-    """ઇમેજ મુજબ આડી તારીખો સાથે મેમરીમાં જ એક્સેલ તૈયાર કરે છે."""
     df = pd.DataFrame(records)
     wb = Workbook()
 
-    # Sheet 1: Master Data
     ws_master = wb.active
     ws_master.title = "Master Data"
     ws_master.append(["Project", "Employee", "Date", "Scan File", "Scan Page"])
     for r in records:
         ws_master.append([r["Project"], r["Employee"], r["Date"], r["Scan File"], r["Scan Page"]])
 
-    # Sheet 2: Scanning Sheet (ઇમેજ મુજબ મેટ્રિક્સ)
     ws = wb.create_sheet(title="Scanning Sheet", index=0)
     ws.views.sheetView[0].showGridLines = True
 
@@ -145,10 +144,9 @@ def generate_excel_bytes(records):
     fill_total = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
 
     unique_dates = df["Date"].unique().tolist()
-    unique_dates.sort(key=lambda d: datetime.strptime(d, "%d-%m-%Y"))
+    unique_dates.sort(key=safe_parse_date)
     employees = sorted(df["Employee"].unique().tolist())
 
-    # Header Row
     c_name = ws.cell(row=2, column=1, value="NAME")
     c_name.font = font_name_col
     c_name.alignment = Alignment(horizontal="center", vertical="center")
@@ -158,8 +156,8 @@ def generate_excel_bytes(records):
     date_col_map = {}
     col_idx = 3
     for d_str in unique_dates:
-        d_obj = datetime.strptime(d_str, "%d-%m-%Y")
-        disp_date = f"{d_obj.day}/{d_obj.month}/{d_obj.year}"
+        d_obj = safe_parse_date(d_str)
+        disp_date = f"{d_obj.day}/{d_obj.month}/{d_obj.year}" if d_obj.year != 2099 else d_str
         c = ws.cell(row=2, column=col_idx, value=disp_date)
         c.font = font_date
         c.alignment = Alignment(horizontal="center", vertical="center")
@@ -244,11 +242,9 @@ st.markdown("""
     <p style='text-align: center; color: gray;'>વોટ્સએપ મેસેજ પેસ્ટ કરો અને તારીખ વાઈઝ સુંદર એક્સેલ બનાવો</p>
 """, unsafe_allow_html=True)
 
-# Session State સાચવવા માટે
 if "master_records" not in st.session_state:
     st.session_state.master_records = {}
 
-# Sidebar માં અગાઉની ફાઈલ અપલોડ કરવાનો ઓપ્શન
 st.sidebar.header("📁 અગાઉ બનાવેલી Excel અપલોડ કરો")
 uploaded_file = st.sidebar.file_uploader("જો જૂનો ડેટા જોડવો હોય તો ફાઈલ ચૂઝ કરો:", type=["xlsx"])
 
@@ -266,17 +262,12 @@ if uploaded_file and "file_loaded" not in st.session_state:
             }
         st.session_state.file_loaded = True
         st.sidebar.success(f"{len(df_old)} જૂના રેકોર્ડ્સ લોડ થયા!")
-    except Exception as e:
+    except Exception:
         st.sidebar.error("Master Data શીટ વાંચવામાં ભૂલ આવી.")
 
-# મુખ્ય ટેક્સ્ટ એરિયા
 raw_input = st.text_area("વોટ્સએપ રો ડેટા અહીં પેસ્ટ કરો:", height=250, placeholder="PROJECT NAME:- MANDAL\nEMPLOYEE NAME:- SHAIKH RAUF\nDATE:- 17-08-2026\nSCAN FILE:- 53\nSCAN PAGE:- 1102...")
 
-col1, col2 = st.columns([1, 4])
-with col1:
-    process_btn = st.button("🚀 ડેટા પ્રોસેસ કરો", type="primary")
-
-if process_btn and raw_input.strip():
+if st.button("🚀 ડેટા પ્રોસેસ કરો", type="primary") and raw_input.strip():
     new_entries = parse_raw_text(raw_input)
     if not new_entries:
         st.error("ટેક્સ્ટમાંથી કોઈ યોગ્ય ડેટા મળ્યો નહીં. ફોર્મેટ ચેક કરો.")
@@ -300,7 +291,6 @@ if process_btn and raw_input.strip():
         st.session_state.temp_conflicts = conflicts
         st.success(f"નવી એન્ટ્રી ઉમેરાઈ: {added} | સમાન ડેટા સ્કીપ થયો: {skipped}")
 
-# જો ડેટામાં તફાવત (Conflict) હોય તો યુઝરને પૂછવું
 if "temp_conflicts" in st.session_state and st.session_state.temp_conflicts:
     st.warning("⚠️ નીચેની એન્ટ્રીઓમાં તારીખ સેમ છે પરંતુ File/Page ના આંકડા બદલાયેલા છે:")
     for idx, (new_d, old_d) in enumerate(st.session_state.temp_conflicts):
@@ -313,7 +303,6 @@ if "temp_conflicts" in st.session_state and st.session_state.temp_conflicts:
             k = (new_d["Project"], new_d["Employee"], new_d["Date"])
             st.session_state.master_records[k] = new_d
 
-# જો ડેટા હાજર હોય તો એક્સેલ ડાઉનલોડ બટન બતાવો
 if st.session_state.master_records:
     records_list = list(st.session_state.master_records.values())
     file_name = generate_project_filename(records_list)
