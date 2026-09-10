@@ -101,7 +101,7 @@ def generate_project_filename(records):
     year_str = "-".join(str(y) for y in years)
     month_str = months_in_order[0] if len(months_in_order) == 1 else "-".join(months_in_order)
     return f"{project_name}_{month_str}_{year_str}.xlsx"
-def generate_excel_bytes(records):
+    def generate_excel_bytes(records):
     df = pd.DataFrame(records)
     wb = Workbook()
 
@@ -227,6 +227,7 @@ def generate_excel_bytes(records):
     output_stream.seek(0)
     return output_stream
 
+# ==================== Streamlit Web App ====================
 st.set_page_config(page_title="Ajay Valiya Excel Data Entry", layout="wide", page_icon="📊")
 
 st.markdown("""
@@ -236,6 +237,12 @@ st.markdown("""
 
 if "master_records" not in st.session_state:
     st.session_state.master_records = {}
+
+if "raw_text_input" not in st.session_state:
+    st.session_state.raw_text_input = ""
+
+def clear_input_text():
+    st.session_state.raw_text_input = ""
 
 st.sidebar.header("📁 અગાઉ બનાવેલી Excel અપલોડ કરો")
 uploaded_file = st.sidebar.file_uploader("જો જૂનો ડેટા જોડવો હોય તો ફાઈલ ચૂઝ કરો:", type=["xlsx"])
@@ -258,9 +265,25 @@ if uploaded_file and "file_loaded" not in st.session_state:
     except Exception:
         st.sidebar.error("Master Data શીટ વાંચવામાં ભૂલ આવી.")
 
-raw_input = st.text_area("વોટ્સએપ રો ડેટા અહીં પેસ્ટ કરો:", height=250, placeholder="PROJECT NAME:- VIRAMGAM\nEMPLOYEE NAME:- DANTANI POOJA\nDATE:- 01-09-2026\nSCAN FILE:- 56\nSCAN PAGE:- 1843...")
+raw_input = st.text_area(
+    "વોટ્સએપ રો ડેટા અહીં પેસ્ટ કરો:",
+    value=st.session_state.raw_text_input,
+    key="raw_text_area",
+    height=250,
+    placeholder="PROJECT NAME:- VIRAMGAM\nEMPLOYEE NAME:- DANTANI POOJA\nDATE:- 01-09-2026\nSCAN FILE:- 56\nSCAN PAGE:- 1843..."
+)
 
-if st.button("🚀 ડેટા પ્રોસેસ કરો", type="primary") and raw_input.strip():
+col1, col2 = st.columns([2, 1])
+
+with col1:
+    process_btn = st.button("🚀 ડેટા પ્રોસેસ કરો", type="primary", use_container_width=True)
+
+with col2:
+    if st.button("🧹 ટેક્સ્ટ ક્લિયર કરો", use_container_width=True):
+        st.session_state.raw_text_input = ""
+        st.rerun()
+
+if process_btn and raw_input.strip():
     new_entries = parse_raw_text(raw_input)
     if not new_entries:
         st.error("ટેક્સ્ટમાંથી કોઈ યોગ્ય ડેટા મળ્યો નહીં. ફોર્મેટ ચેક કરો.")
