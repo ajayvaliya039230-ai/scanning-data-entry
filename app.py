@@ -14,7 +14,6 @@ MONTH_NAMES = {
 }
 
 def normalize_date(date_str):
-    """તારીખ ગમે તે રીતે લખી હોય (01-09, 1/9, 1-9-26), તેને સ્ટાન્ડર્ડ DD-MM-YYYY બનાવી દેશે."""
     clean_d = str(date_str).strip().replace("/", "-")
     parts = clean_d.split("-")
     if len(parts) == 3:
@@ -228,7 +227,6 @@ def generate_project_filename(records):
     output_stream.seek(0)
     return output_stream
 
-# ==================== Streamlit Web App ====================
 st.set_page_config(page_title="Ajay Valiya Excel Data Entry", layout="wide", page_icon="📊")
 
 st.markdown("""
