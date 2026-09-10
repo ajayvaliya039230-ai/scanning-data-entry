@@ -1,0 +1,329 @@
+import io
+import re
+from datetime import datetime
+import pandas as pd
+import streamlit as st
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
+
+# મહિનાઓના અંગ્રેજી નામ
+MONTH_NAMES = {
+    1: "JANUARY", 2: "FEBRUARY", 3: "MARCH", 4: "APRIL",
+    5: "MAY", 6: "JUNE", 7: "JULY", 8: "AUGUST",
+    9: "SEPTEMBER", 10: "OCTOBER", 11: "NOVEMBER", 12: "DECEMBER"
+}
+
+# ==================== ૧. ડેટા એક્સટ્રેક્શન ====================
+def parse_raw_text(text):
+    """વોટ્સએપ ટેક્સ્ટમાંથી વિગતો એક્સટ્રેક્ટ કરે છે."""
+    pattern = re.compile(
+        r"PROJECT\s*(?:NAME)?\s*[:=-]+\s*(?P<project>[^\n\r]+)[\r\n]+"
+        r"EMPLOYEE\s*(?:NAME)?\s*[:=-]+\s*(?P<employee>[^\n\r]+)[\r\n]+"
+        r"DATE\s*[:=-]+\s*(?P<date>[^\n\r]+)[\r\n]+"
+        r"(?:SCAN\s*)?FILE\s*[:=-]+\s*(?P<files>\d+)[\r\n]+"
+        r"(?:SCAN\s*)?PAGE\s*[:=-]+\s*(?P<pages>\d+)",
+        re.IGNORECASE,
+    )
+
+    entries = []
+    for m in pattern.finditer(text):
+        p_date = m.group("date").strip().replace("/", "-")
+        date_parts = p_date.split("-")
+        if len(date_parts) == 3:
+            formatted_date = f"{date_parts[0].zfill(2)}-{date_parts[1].zfill(2)}-{date_parts[2]}"
+        else:
+            formatted_date = p_date
+
+        entries.append({
+            "Project": m.group("project").strip().upper(),
+            "Employee": m.group("employee").strip().upper(),
+            "Date": formatted_date,
+            "Scan File": int(m.group("files").strip()),
+            "Scan Page": int(m.group("pages").strip()),
+        })
+
+    # વૈકલ્પિક ફોર્મેટ
+    if not entries:
+        alt_pattern = re.compile(
+            r"PROJECT\s*(?:NAME)?\s*[:=-]+\s*(?P<project>[^\n\r]+)[\r\n]+"
+            r"(?:EMPLOYEE\s*(?:NAME)?\s*[:=-]+\s*(?P<employee>[^\n\r]+)[\r\n]+)?"
+            r"DATE\s*[:=-]+\s*(?P<date>[^\n\r]+)[\r\n]+"
+            r"(?:SCAN\s*)?PAGE\s*[:=-]+\s*(?P<pages>\d+)[\r\n]+"
+            r"(?:SCAN\s*)?FILE\s*[:=-]+\s*(?P<files>\d+)",
+            re.IGNORECASE,
+        )
+        for m in alt_pattern.finditer(text):
+            emp = m.group("employee")
+            emp = emp.strip().upper() if emp else "UNKNOWN"
+            p_date = m.group("date").strip().replace("/", "-")
+            date_parts = p_date.split("-")
+            if len(date_parts) == 3:
+                formatted_date = f"{date_parts[0].zfill(2)}-{date_parts[1].zfill(2)}-{date_parts[2]}"
+            else:
+                formatted_date = p_date
+
+            entries.append({
+                "Project": m.group("project").strip().upper(),
+                "Employee": emp,
+                "Date": formatted_date,
+                "Scan File": int(m.group("files").strip()),
+                "Scan Page": int(m.group("pages").strip()),
+            })
+
+    return entries
+
+
+def generate_project_filename(records):
+    """પ્રોજેક્ટ નામ, મહિના અને વર્ષ મુજબ ફાઇલ નામ બનાવે છે."""
+    if not records:
+        return "SCANNING_REPORT.xlsx"
+
+    project_name = records[0]["Project"].replace(" ", "_")
+    parsed_dates = []
+    for r in records:
+        try:
+            d = datetime.strptime(r["Date"], "%d-%m-%Y")
+            parsed_dates.append(d)
+        except Exception:
+            pass
+
+    if not parsed_dates:
+        return f"{project_name}_REPORT.xlsx"
+
+    parsed_dates.sort()
+    months_in_order = []
+    for d in parsed_dates:
+        m_name = MONTH_NAMES.get(d.month, str(d.month))
+        if m_name not in months_in_order:
+            months_in_order.append(m_name)
+
+    years = sorted(list(set(d.year for d in parsed_dates)))
+    year_str = "-".join(str(y) for y in years)
+
+    month_str = months_in_order[0] if len(months_in_order) == 1 else "-".join(months_in_order)
+    return f"{project_name}_{month_str}_{year_str}.xlsx"
+
+
+# ==================== ૨. Excel મેટ્રિક્સ ફોર્મેટિંગ ====================
+def generate_excel_bytes(records):
+    """ઇમેજ મુજબ આડી તારીખો સાથે મેમરીમાં જ એક્સેલ તૈયાર કરે છે."""
+    df = pd.DataFrame(records)
+    wb = Workbook()
+
+    # Sheet 1: Master Data
+    ws_master = wb.active
+    ws_master.title = "Master Data"
+    ws_master.append(["Project", "Employee", "Date", "Scan File", "Scan Page"])
+    for r in records:
+        ws_master.append([r["Project"], r["Employee"], r["Date"], r["Scan File"], r["Scan Page"]])
+
+    # Sheet 2: Scanning Sheet (ઇમેજ મુજબ મેટ્રિક્સ)
+    ws = wb.create_sheet(title="Scanning Sheet", index=0)
+    ws.views.sheetView[0].showGridLines = True
+
+    thin_border = Border(
+        left=Side(style="thin", color="BFBFBF"),
+        right=Side(style="thin", color="BFBFBF"),
+        top=Side(style="thin", color="BFBFBF"),
+        bottom=Side(style="thin", color="BFBFBF")
+    )
+    thick_bottom = Border(
+        left=Side(style="thin", color="BFBFBF"),
+        right=Side(style="thin", color="BFBFBF"),
+        top=Side(style="thin", color="BFBFBF"),
+        bottom=Side(style="medium", color="000000")
+    )
+
+    font_name_col = Font(name="Calibri", size=11, bold=True, color="C00000")
+    font_date = Font(name="Calibri", size=11, bold=True, color="C00000")
+    font_emp = Font(name="Calibri", size=11, bold=True, color="1F4E78")
+    font_file_label = Font(name="Calibri", size=10, bold=True, color="333333")
+    font_data = Font(name="Calibri", size=11, bold=False, color="000000")
+    font_total = Font(name="Calibri", size=11, bold=True, color="002060")
+
+    fill_total = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+
+    unique_dates = df["Date"].unique().tolist()
+    unique_dates.sort(key=lambda d: datetime.strptime(d, "%d-%m-%Y"))
+    employees = sorted(df["Employee"].unique().tolist())
+
+    # Header Row
+    c_name = ws.cell(row=2, column=1, value="NAME")
+    c_name.font = font_name_col
+    c_name.alignment = Alignment(horizontal="center", vertical="center")
+    c_name.border = thin_border
+    ws.cell(row=2, column=2, value="").border = thin_border
+
+    date_col_map = {}
+    col_idx = 3
+    for d_str in unique_dates:
+        d_obj = datetime.strptime(d_str, "%d-%m-%Y")
+        disp_date = f"{d_obj.day}/{d_obj.month}/{d_obj.year}"
+        c = ws.cell(row=2, column=col_idx, value=disp_date)
+        c.font = font_date
+        c.alignment = Alignment(horizontal="center", vertical="center")
+        c.border = thin_border
+        date_col_map[d_str] = col_idx
+        col_idx += 1
+
+    total_col_idx = col_idx
+    c_tot = ws.cell(row=2, column=total_col_idx, value="TOTAL")
+    c_tot.font = font_name_col
+    c_tot.alignment = Alignment(horizontal="center", vertical="center")
+    c_tot.border = thin_border
+    c_tot.fill = fill_total
+    ws.row_dimensions[2].height = 25
+
+    data_lookup = {(r["Employee"], r["Date"]): (r["Scan File"], r["Scan Page"]) for _, r in df.iterrows()}
+
+    current_row = 4
+    for emp in employees:
+        page_row = current_row
+        file_row = current_row + 1
+
+        c_emp = ws.cell(row=page_row, column=1, value=emp)
+        c_emp.font = font_emp
+        c_emp.alignment = Alignment(horizontal="left", vertical="center")
+        c_emp.border = thin_border
+        ws.cell(row=page_row, column=2, value="").border = thin_border
+
+        c_file_lbl = ws.cell(row=file_row, column=1, value="FILE")
+        c_file_lbl.font = font_file_label
+        c_file_lbl.alignment = Alignment(horizontal="center", vertical="center")
+        c_file_lbl.border = thick_bottom
+        ws.cell(row=file_row, column=2, value="").border = thick_bottom
+
+        for d_str, c_num in date_col_map.items():
+            file_val, page_val = data_lookup.get((emp, d_str), ("", ""))
+
+            cp = ws.cell(row=page_row, column=c_num, value=page_val if page_val != "" else "")
+            cp.font = font_data
+            cp.alignment = Alignment(horizontal="center", vertical="center")
+            cp.border = thin_border
+
+            cf = ws.cell(row=file_row, column=c_num, value=file_val if file_val != "" else "")
+            cf.font = font_data
+            cf.alignment = Alignment(horizontal="center", vertical="center")
+            cf.border = thick_bottom
+
+        first_col_let = get_column_letter(3)
+        last_col_let = get_column_letter(total_col_idx - 1)
+
+        tot_p = ws.cell(row=page_row, column=total_col_idx, value=f"=SUM({first_col_let}{page_row}:{last_col_let}{page_row})")
+        tot_p.font = font_total
+        tot_p.alignment = Alignment(horizontal="center", vertical="center")
+        tot_p.border = thin_border
+        tot_p.fill = fill_total
+
+        tot_f = ws.cell(row=file_row, column=total_col_idx, value=f"=SUM({first_col_let}{file_row}:{last_col_let}{file_row})")
+        tot_f.font = font_total
+        tot_f.alignment = Alignment(horizontal="center", vertical="center")
+        tot_f.border = thick_bottom
+        tot_f.fill = fill_total
+
+        ws.row_dimensions[page_row].height = 20
+        ws.row_dimensions[file_row].height = 20
+        current_row += 2
+
+    ws.column_dimensions["A"].width = 18
+    ws.column_dimensions["B"].width = 5
+    for c_i in range(3, total_col_idx + 1):
+        col_let = get_column_letter(c_i)
+        ws.column_dimensions[col_let].width = 13
+
+    output_stream = io.BytesIO()
+    wb.save(output_stream)
+    output_stream.seek(0)
+    return output_stream
+    # ==================== ૩. Streamlit Web Interface ====================
+st.set_page_config(page_title="Ajay Valiya Excel Data Entry", layout="wide", page_icon="📊")
+
+st.markdown("""
+    <h2 style='text-align: center; color: #1F4E78;'>AJAY VALIYA EXCEL DATA ENTRY SYSTEM</h2>
+    <p style='text-align: center; color: gray;'>વોટ્સએપ મેસેજ પેસ્ટ કરો અને તારીખ વાઈઝ સુંદર એક્સેલ બનાવો</p>
+""", unsafe_allow_html=True)
+
+# Session State સાચવવા માટે
+if "master_records" not in st.session_state:
+    st.session_state.master_records = {}
+
+# Sidebar માં અગાઉની ફાઈલ અપલોડ કરવાનો ઓપ્શન
+st.sidebar.header("📁 અગાઉ બનાવેલી Excel અપલોડ કરો")
+uploaded_file = st.sidebar.file_uploader("જો જૂનો ડેટા જોડવો હોય તો ફાઈલ ચૂઝ કરો:", type=["xlsx"])
+
+if uploaded_file and "file_loaded" not in st.session_state:
+    try:
+        df_old = pd.read_excel(uploaded_file, sheet_name="Master Data")
+        for _, r in df_old.iterrows():
+            key = (str(r["Project"]).strip().upper(), str(r["Employee"]).strip().upper(), str(r["Date"]).strip())
+            st.session_state.master_records[key] = {
+                "Project": str(r["Project"]).strip().upper(),
+                "Employee": str(r["Employee"]).strip().upper(),
+                "Date": str(r["Date"]).strip(),
+                "Scan File": int(r["Scan File"]),
+                "Scan Page": int(r["Scan Page"])
+            }
+        st.session_state.file_loaded = True
+        st.sidebar.success(f"{len(df_old)} જૂના રેકોર્ડ્સ લોડ થયા!")
+    except Exception as e:
+        st.sidebar.error("Master Data શીટ વાંચવામાં ભૂલ આવી.")
+
+# મુખ્ય ટેક્સ્ટ એરિયા
+raw_input = st.text_area("વોટ્સએપ રો ડેટા અહીં પેસ્ટ કરો:", height=250, placeholder="PROJECT NAME:- MANDAL\nEMPLOYEE NAME:- SHAIKH RAUF\nDATE:- 17-08-2026\nSCAN FILE:- 53\nSCAN PAGE:- 1102...")
+
+col1, col2 = st.columns([1, 4])
+with col1:
+    process_btn = st.button("🚀 ડેટા પ્રોસેસ કરો", type="primary")
+
+if process_btn and raw_input.strip():
+    new_entries = parse_raw_text(raw_input)
+    if not new_entries:
+        st.error("ટેક્સ્ટમાંથી કોઈ યોગ્ય ડેટા મળ્યો નહીં. ફોર્મેટ ચેક કરો.")
+    else:
+        added = 0
+        skipped = 0
+        conflicts = []
+
+        for entry in new_entries:
+            key = (entry["Project"], entry["Employee"], entry["Date"])
+            if key in st.session_state.master_records:
+                old = st.session_state.master_records[key]
+                if old["Scan File"] == entry["Scan File"] and old["Scan Page"] == entry["Scan Page"]:
+                    skipped += 1
+                else:
+                    conflicts.append((entry, old))
+            else:
+                st.session_state.master_records[key] = entry
+                added += 1
+
+        st.session_state.temp_conflicts = conflicts
+        st.success(f"નવી એન્ટ્રી ઉમેરાઈ: {added} | સમાન ડેટા સ્કીપ થયો: {skipped}")
+
+# જો ડેટામાં તફાવત (Conflict) હોય તો યુઝરને પૂછવું
+if "temp_conflicts" in st.session_state and st.session_state.temp_conflicts:
+    st.warning("⚠️ નીચેની એન્ટ્રીઓમાં તારીખ સેમ છે પરંતુ File/Page ના આંકડા બદલાયેલા છે:")
+    for idx, (new_d, old_d) in enumerate(st.session_state.temp_conflicts):
+        st.write(f"**પ્રોજેક્ટ**: {new_d['Project']} | **કર્મચારી**: {new_d['Employee']} | **તારીખ**: {new_d['Date']}")
+        st.write(f"• **જૂનો ડેટા**: Files={old_d['Scan File']}, Pages={old_d['Scan Page']}")
+        st.write(f"• **નવો ડેટા**: Files={new_d['Scan File']}, Pages={new_d['Scan Page']}")
+        
+        choice = st.radio(f"કયો ડેટા રાખવો છે? (#{idx+1})", ["નવો ડેટા રાખો (Replace)", "જૂનો ડેટા રાખો (Keep Old)"], key=f"conf_{idx}")
+        if choice == "નવો ડેટા રાખો (Replace)":
+            k = (new_d["Project"], new_d["Employee"], new_d["Date"])
+            st.session_state.master_records[k] = new_d
+
+# જો ડેટા હાજર હોય તો એક્સેલ ડાઉનલોડ બટન બતાવો
+if st.session_state.master_records:
+    records_list = list(st.session_state.master_records.values())
+    file_name = generate_project_filename(records_list)
+    excel_data = generate_excel_bytes(records_list)
+
+    st.markdown("---")
+    st.subheader("📥 તૈયાર Excel ફાઇલ ડાઉનલોડ કરો:")
+    st.download_button(
+        label=f"⬇️ {file_name} ડાઉનલોડ કરો",
+        data=excel_data,
+        file_name=file_name,
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
