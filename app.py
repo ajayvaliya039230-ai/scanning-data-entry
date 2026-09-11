@@ -105,8 +105,7 @@ def generate_project_filename(records):
     year_str = "-".join(str(y) for y in years)
     month_str = months_in_order[0] if len(months_in_order) == 1 else "-".join(months_in_order)
     return f"{project_name}_{month_str}_{year_str}.xlsx"
-
-def generate_excel_bytes(records, rate_per_page=0.20):
+    def generate_excel_bytes(records, rate_per_page=0.20):
     df = pd.DataFrame(records)
     wb = Workbook()
 
@@ -274,7 +273,7 @@ def generate_excel_bytes(records, rate_per_page=0.20):
 
     last_emp_row = current_row - 1
 
-    # ૧. ઓલ કર્મચારીઓ ટોટલ પેજ (લાલ કલર હાઈલાઈટ)
+    # ૧. ઓલ કર્મચારીઓ ટોટલ પેજ
     row_tot_pages = current_row + 1
     c1 = ws.cell(row=row_tot_pages, column=1, value="TOTAL PAGES")
     c1.font = font_red_highlight
@@ -313,7 +312,7 @@ def generate_excel_bytes(records, rate_per_page=0.20):
     amt_grand_p.number_format = "#,##0.00"
     ws.row_dimensions[row_tot_pages].height = 22
 
-    # ૨. ઓલ કર્મચારીઓ ટોટલ ફાઈલ (લાલ કલર હાઈલાઈટ)
+    # ૨. ઓલ કર્મચારીઓ ટોટલ ફાઈલ
     row_tot_files = row_tot_pages + 1
     c2 = ws.cell(row=row_tot_files, column=1, value="TOTAL FILES")
     c2.font = font_red_highlight
@@ -343,7 +342,7 @@ def generate_excel_bytes(records, rate_per_page=0.20):
     ws.cell(row=row_tot_files, column=amt_col_idx).fill = fill_red_highlight
     ws.row_dimensions[row_tot_files].height = 22
 
-    # ૩. રેટ વડે પેજ ગુણી અમાઉન્ટ (લાલ કલર હાઈલાઈટ)
+    # ૩. રેટ વડે પેજ ગુણી અમાઉન્ટ
     row_tot_amt = row_tot_files + 1
     c3 = ws.cell(row=row_tot_amt, column=1, value="TOTAL AMOUNT (₹)")
     c3.font = font_red_highlight
@@ -388,8 +387,11 @@ st.markdown("""
 if "master_records" not in st.session_state:
     st.session_state.master_records = {}
 
-if "raw_text_input" not in st.session_state:
-    st.session_state.raw_text_input = ""
+if "text_counter" not in st.session_state:
+    st.session_state.text_counter = 0
+
+if "applied_rate" not in st.session_state:
+    st.session_state.applied_rate = 0.20
 
 st.sidebar.header("📁 અગાઉ બનાવેલી Excel અપલોડ કરો")
 uploaded_file = st.sidebar.file_uploader("જો જૂનો ડેટા જોડવો હોય તો ફાઈલ ચૂઝ કરો:", type=["xlsx"])
@@ -412,20 +414,31 @@ if uploaded_file and "file_loaded" not in st.session_state:
     except Exception:
         st.sidebar.error("Master Data શીટ વાંચવામાં ભૂલ આવી.")
 
-st.sidebar.markdown("---")
-st.sidebar.header("💰 રેટ સેટિંગ્સ")
-rate_input = st.sidebar.number_input(
-    "પેજ દીઠ રેટ (₹ Rate per Page):",
-    min_value=0.0,
-    value=0.20,
-    step=0.01,
-    format="%.2f"
-)
+# ==================== રેટ સેટ કરવા માટેનું અલગ સેક્શન ====================
+st.markdown("### 💰 પેજ રેટ સેટિંગ્સ")
+rate_c1, rate_c2 = st.columns([3, 1])
+with rate_c1:
+    new_rate_val = st.number_input(
+        "પેજ દીઠ રેટ (₹ Rate per Page):",
+        min_value=0.0,
+        value=float(st.session_state.applied_rate),
+        step=0.01,
+        format="%.2f",
+        key="rate_number_input"
+    )
+with rate_c2:
+    st.write("")
+    st.write("")
+    if st.button("✅ રેટ સેવ કરો", use_container_width=True):
+        st.session_state.applied_rate = new_rate_val
+        st.success(f"નવો રેટ ₹ {new_rate_val:.2f} સેટ થઈ ગયો!")
 
+st.markdown("---")
+
+# ==================== વોટ્સએપ ટેક્સ્ટ ઇનપુટ ====================
 raw_input = st.text_area(
     "વોટ્સએપ રો ડેટા અહીં પેસ્ટ કરો:",
-    value=st.session_state.raw_text_input,
-    key="raw_text_area",
+    key=f"raw_text_{st.session_state.text_counter}",
     height=250,
     placeholder="PROJECT NAME:- NARODA\nEMPLOYEE NAME:- Kinjal\nDATE:- 01-09-2026\nSCAN FILE:- 24\nSCAN PAGE :- 2,027..."
 )
@@ -437,7 +450,7 @@ with col1:
 
 with col2:
     if st.button("🧹 ટેક્સ્ટ ક્લિયર કરો", use_container_width=True):
-        st.session_state.raw_text_input = ""
+        st.session_state.text_counter += 1
         st.rerun()
 
 if process_btn and raw_input.strip():
@@ -479,10 +492,10 @@ if "temp_conflicts" in st.session_state and st.session_state.temp_conflicts:
 if st.session_state.master_records:
     records_list = list(st.session_state.master_records.values())
     file_name = generate_project_filename(records_list)
-    excel_data = generate_excel_bytes(records_list, rate_per_page=rate_input)
+    excel_data = generate_excel_bytes(records_list, rate_per_page=st.session_state.applied_rate)
 
     st.markdown("---")
-    st.subheader("📥 તૈયાર Excel ફાઇલ ડાઉનલોડ કરો:")
+    st.subheader(f"📥 તૈયાર Excel ફાઇલ (લાગુ કરેલ રેટ: ₹ {st.session_state.applied_rate:.2f}):")
     st.download_button(
         label=f"⬇️ {file_name} ડાઉનલોડ કરો",
         data=excel_data,
