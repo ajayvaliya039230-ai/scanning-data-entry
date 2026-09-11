@@ -13,6 +13,11 @@ MONTH_NAMES = {
     9: "SEPTEMBER", 10: "OCTOBER", 11: "NOVEMBER", 12: "DECEMBER"
 }
 
+def clean_int(val):
+    """અલ્પવિરામ કે સ્પેસ દૂર કરીને સાચો પૂર્ણાંક નંબર બનાવે છે."""
+    s = re.sub(r"[^\d]", "", str(val))
+    return int(s) if s else 0
+
 def normalize_date(date_str):
     clean_d = str(date_str).strip().replace("/", "-")
     parts = clean_d.split("-")
@@ -43,8 +48,8 @@ def parse_raw_text(text):
         r"PROJECT\s*(?:NAME)?\s*[:=-]+\s*(?P<project>[^\n\r]+)[\r\n]+"
         r"EMPLOYEE\s*(?:NAME)?\s*[:=-]+\s*(?P<employee>[^\n\r]+)[\r\n]+"
         r"DATE\s*[:=-]+\s*(?P<date>[^\n\r]+)[\r\n]+"
-        r"(?:SCAN\s*)?FILE\s*[:=-]+\s*(?P<files>\d+)[\r\n]+"
-        r"(?:SCAN\s*)?PAGE\s*[:=-]+\s*(?P<pages>\d+)",
+        r"(?:SCAN\s*)?FILE\s*[:=-]+\s*(?P<files>[\d,\s]+)[\r\n]+"
+        r"(?:SCAN\s*)?PAGE\s*[:=-]+\s*(?P<pages>[\d,\s]+)",
         re.IGNORECASE,
     )
 
@@ -54,8 +59,8 @@ def parse_raw_text(text):
             "Project": m.group("project").strip().upper(),
             "Employee": m.group("employee").strip().upper(),
             "Date": normalize_date(m.group("date")),
-            "Scan File": int(m.group("files").strip()),
-            "Scan Page": int(m.group("pages").strip()),
+            "Scan File": clean_int(m.group("files")),
+            "Scan Page": clean_int(m.group("pages")),
         })
 
     if not entries:
@@ -63,8 +68,8 @@ def parse_raw_text(text):
             r"PROJECT\s*(?:NAME)?\s*[:=-]+\s*(?P<project>[^\n\r]+)[\r\n]+"
             r"(?:EMPLOYEE\s*(?:NAME)?\s*[:=-]+\s*(?P<employee>[^\n\r]+)[\r\n]+)?"
             r"DATE\s*[:=-]+\s*(?P<date>[^\n\r]+)[\r\n]+"
-            r"(?:SCAN\s*)?PAGE\s*[:=-]+\s*(?P<pages>\d+)[\r\n]+"
-            r"(?:SCAN\s*)?FILE\s*[:=-]+\s*(?P<files>\d+)",
+            r"(?:SCAN\s*)?PAGE\s*[:=-]+\s*(?P<pages>[\d,\s]+)[\r\n]+"
+            r"(?:SCAN\s*)?FILE\s*[:=-]+\s*(?P<files>[\d,\s]+)",
             re.IGNORECASE,
         )
         for m in alt_pattern.finditer(text):
@@ -74,8 +79,8 @@ def parse_raw_text(text):
                 "Project": m.group("project").strip().upper(),
                 "Employee": emp,
                 "Date": normalize_date(m.group("date")),
-                "Scan File": int(m.group("files").strip()),
-                "Scan Page": int(m.group("pages").strip()),
+                "Scan File": clean_int(m.group("files")),
+                "Scan Page": clean_int(m.group("pages")),
             })
 
     return entries
@@ -101,7 +106,7 @@ def generate_project_filename(records):
     year_str = "-".join(str(y) for y in years)
     month_str = months_in_order[0] if len(months_in_order) == 1 else "-".join(months_in_order)
     return f"{project_name}_{month_str}_{year_str}.xlsx"
-def generate_excel_bytes(records):
+    def generate_excel_bytes(records):
     df = pd.DataFrame(records)
     wb = Workbook()
 
@@ -241,9 +246,6 @@ if "master_records" not in st.session_state:
 if "raw_text_input" not in st.session_state:
     st.session_state.raw_text_input = ""
 
-def clear_input_text():
-    st.session_state.raw_text_input = ""
-
 st.sidebar.header("📁 અગાઉ બનાવેલી Excel અપલોડ કરો")
 uploaded_file = st.sidebar.file_uploader("જો જૂનો ડેટા જોડવો હોય તો ફાઈલ ચૂઝ કરો:", type=["xlsx"])
 
@@ -257,8 +259,8 @@ if uploaded_file and "file_loaded" not in st.session_state:
                 "Project": str(r["Project"]).strip().upper(),
                 "Employee": str(r["Employee"]).strip().upper(),
                 "Date": d_norm,
-                "Scan File": int(r["Scan File"]),
-                "Scan Page": int(r["Scan Page"])
+                "Scan File": clean_int(r["Scan File"]),
+                "Scan Page": clean_int(r["Scan Page"])
             }
         st.session_state.file_loaded = True
         st.sidebar.success(f"{len(df_old)} જૂના રેકોર્ડ્સ લોડ થયા!")
@@ -270,7 +272,7 @@ raw_input = st.text_area(
     value=st.session_state.raw_text_input,
     key="raw_text_area",
     height=250,
-    placeholder="PROJECT NAME:- VIRAMGAM\nEMPLOYEE NAME:- DANTANI POOJA\nDATE:- 01-09-2026\nSCAN FILE:- 56\nSCAN PAGE:- 1843..."
+    placeholder="PROJECT NAME:- NARODA\nEMPLOYEE NAME:- Kinjal\nDATE:- 01-09-2026\nSCAN FILE:- 24\nSCAN PAGE :- 2,027..."
 )
 
 col1, col2 = st.columns([2, 1])
