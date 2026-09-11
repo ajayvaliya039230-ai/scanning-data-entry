@@ -14,7 +14,6 @@ MONTH_NAMES = {
 }
 
 def clean_int(val):
-    """અલ્પવિરામ કે સ્પેસ દૂર કરીને સાચો પૂર્ણાંક નંબર બનાવે છે."""
     s = re.sub(r"[^\d]", "", str(val))
     return int(s) if s else 0
 
@@ -106,7 +105,8 @@ def generate_project_filename(records):
     year_str = "-".join(str(y) for y in years)
     month_str = months_in_order[0] if len(months_in_order) == 1 else "-".join(months_in_order)
     return f"{project_name}_{month_str}_{year_str}.xlsx"
-def generate_excel_bytes(records):
+
+def generate_excel_bytes(records, rate_per_page=0.20):
     df = pd.DataFrame(records)
     wb = Workbook()
 
@@ -138,8 +138,22 @@ def generate_excel_bytes(records):
     font_file_label = Font(name="Calibri", size=10, bold=True, color="333333")
     font_data = Font(name="Calibri", size=11, bold=False, color="000000")
     font_total = Font(name="Calibri", size=11, bold=True, color="002060")
-
     fill_total = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+
+    fill_red_highlight = PatternFill(start_color="FFD9D9", end_color="FFD9D9", fill_type="solid")
+    font_red_highlight = Font(name="Calibri", size=11, bold=True, color="C00000")
+    thick_red_border = Border(
+        left=Side(style="thin", color="BFBFBF"),
+        right=Side(style="thin", color="BFBFBF"),
+        top=Side(style="thin", color="C00000"),
+        bottom=Side(style="medium", color="C00000")
+    )
+    thin_red_border = Border(
+        left=Side(style="thin", color="BFBFBF"),
+        right=Side(style="thin", color="BFBFBF"),
+        top=Side(style="thin", color="C00000"),
+        bottom=Side(style="thin", color="C00000")
+    )
 
     unique_dates = sorted(list(set(df["Date"].tolist())), key=parse_date_obj)
     employees = sorted(df["Employee"].unique().tolist())
@@ -163,16 +177,33 @@ def generate_excel_bytes(records):
         col_idx += 1
 
     total_col_idx = col_idx
+    rate_col_idx = col_idx + 1
+    amt_col_idx = col_idx + 2
+
     c_tot = ws.cell(row=2, column=total_col_idx, value="TOTAL")
     c_tot.font = font_name_col
     c_tot.alignment = Alignment(horizontal="center", vertical="center")
     c_tot.border = thin_border
     c_tot.fill = fill_total
+
+    c_rate = ws.cell(row=2, column=rate_col_idx, value="RATE")
+    c_rate.font = font_name_col
+    c_rate.alignment = Alignment(horizontal="center", vertical="center")
+    c_rate.border = thin_border
+    c_rate.fill = fill_total
+
+    c_amt = ws.cell(row=2, column=amt_col_idx, value="AMOUNT")
+    c_amt.font = font_name_col
+    c_amt.alignment = Alignment(horizontal="center", vertical="center")
+    c_amt.border = thin_border
+    c_amt.fill = fill_total
+
     ws.row_dimensions[2].height = 25
 
     data_lookup = {(r["Employee"], r["Date"]): (r["Scan File"], r["Scan Page"]) for _, r in df.iterrows()}
 
     current_row = 4
+    first_emp_row = current_row
     for emp in employees:
         page_row = current_row
         file_row = current_row + 1
@@ -204,6 +235,9 @@ def generate_excel_bytes(records):
 
         first_col_let = get_column_letter(3)
         last_col_let = get_column_letter(total_col_idx - 1)
+        tot_col_let = get_column_letter(total_col_idx)
+        rate_col_let = get_column_letter(rate_col_idx)
+        amt_col_let = get_column_letter(amt_col_idx)
 
         tot_p = ws.cell(row=page_row, column=total_col_idx, value=f"=SUM({first_col_let}{page_row}:{last_col_let}{page_row})")
         tot_p.font = font_total
@@ -211,21 +245,132 @@ def generate_excel_bytes(records):
         tot_p.border = thin_border
         tot_p.fill = fill_total
 
+        r_p = ws.cell(row=page_row, column=rate_col_idx, value=rate_per_page)
+        r_p.font = font_total
+        r_p.alignment = Alignment(horizontal="center", vertical="center")
+        r_p.border = thin_border
+        r_p.fill = fill_total
+        r_p.number_format = "0.00"
+
+        amt_p = ws.cell(row=page_row, column=amt_col_idx, value=f"={tot_col_let}{page_row}*{rate_col_let}{page_row}")
+        amt_p.font = font_total
+        amt_p.alignment = Alignment(horizontal="center", vertical="center")
+        amt_p.border = thin_border
+        amt_p.fill = fill_total
+        amt_p.number_format = "#,##0.00"
+
         tot_f = ws.cell(row=file_row, column=total_col_idx, value=f"=SUM({first_col_let}{file_row}:{last_col_let}{file_row})")
         tot_f.font = font_total
         tot_f.alignment = Alignment(horizontal="center", vertical="center")
         tot_f.border = thick_bottom
         tot_f.fill = fill_total
 
+        ws.cell(row=file_row, column=rate_col_idx, value="").border = thick_bottom
+        ws.cell(row=file_row, column=amt_col_idx, value="").border = thick_bottom
+
         ws.row_dimensions[page_row].height = 20
         ws.row_dimensions[file_row].height = 20
         current_row += 2
 
-    ws.column_dimensions["A"].width = 18
+    last_emp_row = current_row - 1
+
+    # ૧. ઓલ કર્મચારીઓ ટોટલ પેજ (લાલ કલર હાઈલાઈટ)
+    row_tot_pages = current_row + 1
+    c1 = ws.cell(row=row_tot_pages, column=1, value="TOTAL PAGES")
+    c1.font = font_red_highlight
+    c1.alignment = Alignment(horizontal="left", vertical="center")
+    c1.border = thin_red_border
+    c1.fill = fill_red_highlight
+    ws.cell(row=row_tot_pages, column=2, value="").border = thin_red_border
+    ws.cell(row=row_tot_pages, column=2).fill = fill_red_highlight
+
+    for d_str, c_num in date_col_map.items():
+        c_let = get_column_letter(c_num)
+        cp_tot = ws.cell(row=row_tot_pages, column=c_num, value=f'=SUMIF($A${first_emp_row}:$A${last_emp_row}, "<>FILE", {c_let}${first_emp_row}:{c_let}${last_emp_row})')
+        cp_tot.font = font_red_highlight
+        cp_tot.alignment = Alignment(horizontal="center", vertical="center")
+        cp_tot.border = thin_red_border
+        cp_tot.fill = fill_red_highlight
+
+    tot_pages_grand = ws.cell(row=row_tot_pages, column=total_col_idx, value=f'=SUMIF($A${first_emp_row}:$A${last_emp_row}, "<>FILE", {tot_col_let}${first_emp_row}:{tot_col_let}${last_emp_row})')
+    tot_pages_grand.font = font_red_highlight
+    tot_pages_grand.alignment = Alignment(horizontal="center", vertical="center")
+    tot_pages_grand.border = thin_red_border
+    tot_pages_grand.fill = fill_red_highlight
+
+    r_grand = ws.cell(row=row_tot_pages, column=rate_col_idx, value=rate_per_page)
+    r_grand.font = font_red_highlight
+    r_grand.alignment = Alignment(horizontal="center", vertical="center")
+    r_grand.border = thin_red_border
+    r_grand.fill = fill_red_highlight
+    r_grand.number_format = "0.00"
+
+    amt_grand_p = ws.cell(row=row_tot_pages, column=amt_col_idx, value=f"={tot_col_let}{row_tot_pages}*{rate_col_let}{row_tot_pages}")
+    amt_grand_p.font = font_red_highlight
+    amt_grand_p.alignment = Alignment(horizontal="center", vertical="center")
+    amt_grand_p.border = thin_red_border
+    amt_grand_p.fill = fill_red_highlight
+    amt_grand_p.number_format = "#,##0.00"
+    ws.row_dimensions[row_tot_pages].height = 22
+
+    # ૨. ઓલ કર્મચારીઓ ટોટલ ફાઈલ (લાલ કલર હાઈલાઈટ)
+    row_tot_files = row_tot_pages + 1
+    c2 = ws.cell(row=row_tot_files, column=1, value="TOTAL FILES")
+    c2.font = font_red_highlight
+    c2.alignment = Alignment(horizontal="left", vertical="center")
+    c2.border = thin_red_border
+    c2.fill = fill_red_highlight
+    ws.cell(row=row_tot_files, column=2, value="").border = thin_red_border
+    ws.cell(row=row_tot_files, column=2).fill = fill_red_highlight
+
+    for d_str, c_num in date_col_map.items():
+        c_let = get_column_letter(c_num)
+        cf_tot = ws.cell(row=row_tot_files, column=c_num, value=f'=SUMIF($A${first_emp_row}:$A${last_emp_row}, "FILE", {c_let}${first_emp_row}:{c_let}${last_emp_row})')
+        cf_tot.font = font_red_highlight
+        cf_tot.alignment = Alignment(horizontal="center", vertical="center")
+        cf_tot.border = thin_red_border
+        cf_tot.fill = fill_red_highlight
+
+    tot_files_grand = ws.cell(row=row_tot_files, column=total_col_idx, value=f'=SUMIF($A${first_emp_row}:$A${last_emp_row}, "FILE", {tot_col_let}${first_emp_row}:{tot_col_let}${last_emp_row})')
+    tot_files_grand.font = font_red_highlight
+    tot_files_grand.alignment = Alignment(horizontal="center", vertical="center")
+    tot_files_grand.border = thin_red_border
+    tot_files_grand.fill = fill_red_highlight
+
+    ws.cell(row=row_tot_files, column=rate_col_idx, value="").border = thin_red_border
+    ws.cell(row=row_tot_files, column=rate_col_idx).fill = fill_red_highlight
+    ws.cell(row=row_tot_files, column=amt_col_idx, value="").border = thin_red_border
+    ws.cell(row=row_tot_files, column=amt_col_idx).fill = fill_red_highlight
+    ws.row_dimensions[row_tot_files].height = 22
+
+    # ૩. રેટ વડે પેજ ગુણી અમાઉન્ટ (લાલ કલર હાઈલાઈટ)
+    row_tot_amt = row_tot_files + 1
+    c3 = ws.cell(row=row_tot_amt, column=1, value="TOTAL AMOUNT (₹)")
+    c3.font = font_red_highlight
+    c3.alignment = Alignment(horizontal="left", vertical="center")
+    c3.border = thick_red_border
+    c3.fill = fill_red_highlight
+    ws.cell(row=row_tot_amt, column=2, value="").border = thick_red_border
+    ws.cell(row=row_tot_amt, column=2).fill = fill_red_highlight
+
+    for c_num in range(3, amt_col_idx):
+        blank_c = ws.cell(row=row_tot_amt, column=c_num, value="")
+        blank_c.border = thick_red_border
+        blank_c.fill = fill_red_highlight
+
+    final_amt_c = ws.cell(row=row_tot_amt, column=amt_col_idx, value=f"={tot_col_let}{row_tot_pages}*{rate_col_let}{row_tot_pages}")
+    final_amt_c.font = font_red_highlight
+    final_amt_c.alignment = Alignment(horizontal="center", vertical="center")
+    final_amt_c.border = thick_red_border
+    final_amt_c.fill = fill_red_highlight
+    final_amt_c.number_format = "#,##0.00"
+    ws.row_dimensions[row_tot_amt].height = 24
+
+    ws.column_dimensions["A"].width = 22
     ws.column_dimensions["B"].width = 5
-    for c_i in range(3, total_col_idx + 1):
+    for c_i in range(3, amt_col_idx + 1):
         col_let = get_column_letter(c_i)
-        ws.column_dimensions[col_let].width = 13
+        ws.column_dimensions[col_let].width = 14
 
     output_stream = io.BytesIO()
     wb.save(output_stream)
@@ -266,6 +411,16 @@ if uploaded_file and "file_loaded" not in st.session_state:
         st.sidebar.success(f"{len(df_old)} જૂના રેકોર્ડ્સ લોડ થયા!")
     except Exception:
         st.sidebar.error("Master Data શીટ વાંચવામાં ભૂલ આવી.")
+
+st.sidebar.markdown("---")
+st.sidebar.header("💰 રેટ સેટિંગ્સ")
+rate_input = st.sidebar.number_input(
+    "પેજ દીઠ રેટ (₹ Rate per Page):",
+    min_value=0.0,
+    value=0.20,
+    step=0.01,
+    format="%.2f"
+)
 
 raw_input = st.text_area(
     "વોટ્સએપ રો ડેટા અહીં પેસ્ટ કરો:",
@@ -324,7 +479,7 @@ if "temp_conflicts" in st.session_state and st.session_state.temp_conflicts:
 if st.session_state.master_records:
     records_list = list(st.session_state.master_records.values())
     file_name = generate_project_filename(records_list)
-    excel_data = generate_excel_bytes(records_list)
+    excel_data = generate_excel_bytes(records_list, rate_per_page=rate_input)
 
     st.markdown("---")
     st.subheader("📥 તૈયાર Excel ફાઇલ ડાઉનલોડ કરો:")
