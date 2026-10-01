@@ -44,11 +44,10 @@ def parse_date_obj(date_str):
 
 def parse_raw_text(text):
     """
-    1. LOCATION / LOC ને પણ PROJECT ગણે છે.
-    2. [03/09, 18:26] જેવા WhatsApp ટાઈમસ્ટેમ્પથી દરેક મેસેજ બ્લોક અલગ પાડે છે.
-    3. એક જ લાઈનમાં 'Name MilanRaval Date-03-09-2026' લખેલું હોય તો પણ ઓળખી લે છે.
+    1. 'Name MilanRaval' (ચિહ્ન વગર) અને 'Name. RONAK' (ચિહ્ન સાથે) બંને ઓળખશે.
+    2. LOCATION / LOC ને આપોઆપ PROJECT ગણશે.
+    3. WhatsApp હેડર [03/09, 18:26] ફિલ્ટર કરી બંને કર્મચારીઓનો ડેટા એન્ટર કરશે.
     """
-    # વોટ્સએપ ટાઈમસ્ટેમ્પ વડે બ્લોક અલગ કરવા
     raw_blocks = re.split(r"\[\d{1,2}/\d{1,2}(?:/\d{2,4})?,\s*[^\]]+\]", text)
     blocks = [b.strip() for b in raw_blocks if b.strip()]
     if not blocks:
@@ -57,12 +56,12 @@ def parse_raw_text(text):
     entries = []
     last_known_project = "DEFAULT PROJECT"
 
-    # Regex પેટર્ન (Location ને પ્રોજેક્ટ ગણવા માટે)
-    p_proj = re.compile(r"(?:PROJECT(?:\s*NAME)?|PRJ|LOCATION|LOC)\s*[:=.-]+\s*([A-Za-z0-9_\s]+?)(?=\s+(?:EMPLOYEE|EMP|NAME|DATE|DT|FILE|PAGE)|[\r\n]|$)", re.IGNORECASE)
-    p_emp = re.compile(r"(?:EMPLOYEE(?:\s*NAME)?|EMP(?:\s*NAME)?|NAME)\s*[:=.-]+\s*([A-Za-z0-9_\s]+?)(?=\s+(?:PROJECT|PRJ|LOCATION|LOC|DATE|DT|FILE|PAGE)|[\r\n]|$)", re.IGNORECASE)
-    p_date = re.compile(r"(?:DATE|DT)\s*[:=.-]+\s*([0-9]{1,2}[-/.][0-9]{1,2}[-/.][0-9]{2,4})", re.IGNORECASE)
-    p_file = re.compile(r"(?:SCAN\s*)?(?:FILES?|NO\.?\s*OF\s*FILES?)\s*[:=.-]+\s*([\d,\s]+)", re.IGNORECASE)
-    p_page = re.compile(r"(?:SCAN\s*)?(?:PAGES?|NO\.?\s*OF\s*PAGES?)\s*[:=.-]+\s*([\d,\s]+)", re.IGNORECASE)
+    # [:=.-]* રાખવાથી ચિહ્ન હોય કે ન હોય (માત્ર સ્પેસ હોય) તો પણ ડેટા પકડી લેશે
+    p_proj = re.compile(r"(?:PROJECT(?:\s*NAME)?|PRJ|LOCATION|LOC)\s*[:=.-]*\s*([A-Za-z0-9_\s]+?)(?=\s+(?:EMPLOYEE|EMP|NAME|DATE|DT|FILE|PAGE)|[\r\n]|$)", re.IGNORECASE)
+    p_emp = re.compile(r"(?:EMPLOYEE(?:\s*NAME)?|EMP(?:\s*NAME)?|NAME)\s*[:=.-]*\s*([A-Za-z0-9_]+(?:\s+[A-Za-z0-9_]+)*?)(?=\s+(?:PROJECT|PRJ|LOCATION|LOC|DATE|DT|FILE|PAGE)|[\r\n]|$)", re.IGNORECASE)
+    p_date = re.compile(r"(?:DATE|DT)\s*[:=.-]*\s*([0-9]{1,2}[-/.][0-9]{1,2}[-/.][0-9]{2,4})", re.IGNORECASE)
+    p_file = re.compile(r"(?:SCAN\s*)?(?:FILES?|NO\.?\s*OF\s*FILES?)\s*[:=.-]*\s*([\d,\s]+)", re.IGNORECASE)
+    p_page = re.compile(r"(?:SCAN\s*)?(?:PAGES?|NO\.?\s*OF\s*PAGES?)\s*[:=.-]*\s*([\d,\s]+)", re.IGNORECASE)
 
     for block in blocks:
         entry = {}
@@ -120,7 +119,7 @@ def generate_project_filename(records):
     month_str = months_in_order[0] if len(months_in_order) == 1 else "-".join(months_in_order)
     return f"{project_name}_{month_str}_{year_str}.xlsx"
 
-def generate_excel_bytes(records, rate_per_page=0.20):
+    def generate_excel_bytes(records, rate_per_page=0.20):
     df = pd.DataFrame(records)
     wb = Workbook()
 
@@ -391,7 +390,7 @@ def generate_excel_bytes(records, rate_per_page=0.20):
     output_stream.seek(0)
     return output_stream
 
-    # ==================== Streamlit Web App ====================
+# ==================== Streamlit Web App ====================
 st.set_page_config(page_title="Ajay Valiya Excel Data Entry", layout="wide", page_icon="📊")
 
 st.markdown("""
@@ -491,7 +490,7 @@ if process_btn and raw_input.strip():
         st.success(f"નવી એન્ટ્રી ઉમેરાઈ: {added} | સમાન ડેટા સ્કીપ થયો: {skipped}")
 
 if "temp_conflicts" in st.session_state and st.session_state.temp_conflicts:
-    st.warning("⚠️ નીચેની એન્ટ્રીઓમાં તારીખ સેમ છે પરંતુ File/Page ના આંકડા બદલાયેલા છે:")
+    st.warning("⚠️️ નીચેની એન્ટ્રીઓમાં તારીખ સેમ છે પરંતુ File/Page ના આંકડા બદલાયેલા છે:")
     for idx, (new_d, old_d) in enumerate(st.session_state.temp_conflicts):
         st.write(f"**પ્રોજેક્ટ**: {new_d['Project']} | **કર્મચારી**: {new_d['Employee']} | **તારીખ**: {new_d['Date']}")
         st.write(f"• **જૂનો ડેટા**: Files={old_d['Scan File']}, Pages={old_d['Scan Page']}")
