@@ -44,78 +44,62 @@ def parse_date_obj(date_str):
 
 def parse_raw_text(text):
     """
-    કોઈપણ ક્રમમાં (Project, Employee, Date, Files, Pages) લખેલ ડેટા 
-    અને પ્રોજેક્ટ નામ ન લખ્યું હોય તો પણ યોગ્ય રીતે ઓળખી લેશે.
+    1. LOCATION / LOC ને પણ PROJECT તરીકે ગણશે.
+    2. [03/09, 18:26] જેવા વોટ્સએપ ટાઈમસ્ટેમ્પથી દરેક મેસેજ બ્લોક આપોઆપ અલગ પાડશે.
+    3. એક જ લાઈનમાં 'Name MilanRaval Date-03-09-2026' લખેલું હોય તો પણ ઓળખી લેશે.
     """
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    
+    # વોટ્સએપ મેસેજ ટાઈમસ્ટેમ્પ આધારિત બ્લોક અલગ કરવા
+    raw_blocks = re.split(r"\[\d{1,2}/\d{1,2}(?:/\d{2,4})?,\s*[^\]]+\]", text)
+    blocks = [b.strip() for b in raw_blocks if b.strip()]
+    if not blocks:
+        blocks = [text]
+
     entries = []
-    current_entry = {}
-    last_known_project = "DEFAULT PROJECT"
-    
-    p_proj = re.compile(r"^(?:PROJECT\s*(?:NAME)?|PRJ)\s*[:=-]+\s*(.+)$", re.IGNORECASE)
-    p_emp = re.compile(r"^(?:EMPLOYEE\s*(?:NAME)?|EMP\s*(?:NAME)?|NAME)\s*[:=-]+\s*(.+)$", re.IGNORECASE)
-    p_date = re.compile(r"^(?:DATE|DT)\s*[:=-]+\s*(.+)$", re.IGNORECASE)
-    p_file = re.compile(r"^(?:SCAN\s*)?(?:FILES?|NO\.?\s*OF\s*FILES?)\s*[:=-]+\s*([\d,\s]+)$", re.IGNORECASE)
-    p_page = re.compile(r"^(?:SCAN\s*)?(?:PAGES?|NO\.?\s*OF\s*PAGES?)\s*[:=-]+\s*([\d,\s]+)$", re.IGNORECASE)
+    last_known_project = "SANAND"
 
-    for line in lines:
-        m_proj = p_proj.match(line)
-        m_emp = p_emp.match(line)
-        m_date = p_date.match(line)
-        m_file = p_file.match(line)
-        m_page = p_page.match(line)
+    # Regex Patterns (LOCATION / LOC ને પણ પ્રોજેક્ટમાં ગણી લેશે)
+    p_proj = re.compile(r"(?:PROJECT(?:\s*NAME)?|PRJ|LOCATION|LOC)\s*[:=-]+\s*([A-Za-z0-9_\s]+?)(?=\s+(?:EMPLOYEE|EMP|NAME|DATE|DT|FILE|PAGE)|[\r\n]|$)", re.IGNORECASE)
+    p_emp = re.compile(r"(?:EMPLOYEE(?:\s*NAME)?|EMP(?:\s*NAME)?|NAME)\s*[:=.-]+\s*([A-Za-z0-9_\s]+?)(?=\s+(?:PROJECT|PRJ|LOCATION|LOC|DATE|DT|FILE|PAGE)|[\r\n]|$)", re.IGNORECASE)
+    p_date = re.compile(r"(?:DATE|DT)\s*[:=.-]+\s*([0-9]{1,2}[-/.][0-9]{1,2}[-/.][0-9]{2,4})", re.IGNORECASE)
+    p_file = re.compile(r"(?:SCAN\s*)?(?:FILES?|NO\.?\s*OF\s*FILES?)\s*[:=.-]+\s*([\d,\s]+)", re.IGNORECASE)
+    p_page = re.compile(r"(?:SCAN\s*)?(?:PAGES?|NO\.?\s*OF\s*PAGES?)\s*[:=.-]+\s*([\d,\s]+)", re.IGNORECASE)
 
-        # જો નવો બ્લોક શરૂ થાય અને જૂનો ડેટા અધૂરો ન હોય તો સેવ કરવો
-        if (m_emp or m_proj) and ("Employee" in current_entry and "Date" in current_entry):
-            if "Scan File" in current_entry or "Scan Page" in current_entry:
-                if "Project" not in current_entry or not current_entry["Project"]:
-                    current_entry["Project"] = last_known_project
-                entries.append({
-                    "Project": current_entry.get("Project", last_known_project),
-                    "Employee": current_entry.get("Employee", "UNKNOWN"),
-                    "Date": current_entry.get("Date", ""),
-                    "Scan File": current_entry.get("Scan File", 0),
-                    "Scan Page": current_entry.get("Scan Page", 0)
-                })
-                current_entry = {}
+    for block in blocks:
+        entry = {}
+
+        m_proj = p_proj.search(block)
+        m_emp = p_emp.search(block)
+        m_date = p_date.search(block)
+        m_file = p_file.search(block)
+        m_page = p_page.search(block)
 
         if m_proj:
-            current_entry["Project"] = m_proj.group(1).strip().upper()
-            last_known_project = current_entry["Project"]
-        elif m_emp:
-            current_entry["Employee"] = m_emp.group(1).strip().upper()
-        elif m_date:
-            current_entry["Date"] = normalize_date(m_date.group(1))
-        elif m_file:
-            current_entry["Scan File"] = clean_int(m_file.group(1))
-        elif m_page:
-            current_entry["Scan Page"] = clean_int(m_page.group(1))
+            entry["Project"] = m_proj.group(1).strip().upper()
+            last_known_project = entry["Project"]
+        else:
+            entry["Project"] = last_known_project
 
-        # જો એક જ એન્ટ્રીના બધા ફિલ્ડ ભરાઈ ગયા હોય
-        if "Employee" in current_entry and "Date" in current_entry and "Scan File" in current_entry and "Scan Page" in current_entry:
-            if "Project" not in current_entry or not current_entry["Project"]:
-                current_entry["Project"] = last_known_project
+        if m_emp:
+            entry["Employee"] = m_emp.group(1).strip().upper()
+        if m_date:
+            entry["Date"] = normalize_date(m_date.group(1))
+        if m_file:
+            entry["Scan File"] = clean_int(m_file.group(1))
+        if m_page:
+            entry["Scan Page"] = clean_int(m_page.group(1))
+
+        # જો કર્મચારીનું નામ અને તારીખ મળી જાય તો જ એન્ટ્રી ઉમેરવી
+        if entry.get("Employee") and entry.get("Date"):
             entries.append({
-                "Project": current_entry.get("Project", last_known_project),
-                "Employee": current_entry.get("Employee", "UNKNOWN"),
-                "Date": current_entry.get("Date", ""),
-                "Scan File": current_entry.get("Scan File", 0),
-                "Scan Page": current_entry.get("Scan Page", 0)
+                "Project": entry.get("Project", last_known_project),
+                "Employee": entry.get("Employee", "UNKNOWN"),
+                "Date": entry.get("Date", ""),
+                "Scan File": entry.get("Scan File", 0),
+                "Scan Page": entry.get("Scan Page", 0)
             })
-            current_entry = {}
-
-    # છેલ્લો ડેટા જો બાકી રહી ગયો હોય તો ઉમેરી દેવો
-    if current_entry.get("Employee") and current_entry.get("Date"):
-        entries.append({
-            "Project": current_entry.get("Project", last_known_project),
-            "Employee": current_entry.get("Employee", "UNKNOWN"),
-            "Date": current_entry.get("Date", ""),
-            "Scan File": current_entry.get("Scan File", 0),
-            "Scan Page": current_entry.get("Scan Page", 0)
-        })
 
     return entries
+
 
 def generate_project_filename(records):
     if not records:
@@ -132,7 +116,8 @@ def generate_project_filename(records):
     for d in parsed_dates:
         m_name = MONTH_NAMES.get(d.month, str(d.month))
         if m_name not in months_in_order:
-            months_in_order.append(m_name)
+            months_in_order.append(m_na
+                                   me)
 
     years = sorted(list(set(d.year for d in parsed_dates)))
     year_str = "-".join(str(y) for y in years)
