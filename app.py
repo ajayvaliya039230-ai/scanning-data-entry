@@ -137,8 +137,9 @@ def generate_project_filename(records):
     years = sorted(list(set(d.year for d in parsed_dates)))
     year_str = "-".join(str(y) for y in years)
     month_str = months_in_order[0] if len(months_in_order) == 1 else "-".join(months_in_order)
-    return f"{project_name}_{month_str}_{year_str}.xlsx"def generate_excel_bytes(records, rate_per_page=0.20):
-        
+    return f"{project_name}_{month_str}_{year_str}.xlsx"
+
+def generate_excel_bytes(records, rate_per_page=0.20):
     df = pd.DataFrame(records)
     wb = Workbook()
 
@@ -408,6 +409,7 @@ def generate_project_filename(records):
     wb.save(output_stream)
     output_stream.seek(0)
     return output_stream
+
     # ==================== Streamlit Web App ====================
 st.set_page_config(page_title="Ajay Valiya Excel Data Entry", layout="wide", page_icon="📊")
 
