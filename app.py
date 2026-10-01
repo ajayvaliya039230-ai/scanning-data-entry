@@ -43,44 +43,77 @@ def parse_date_obj(date_str):
     return datetime(2099, 1, 1)
 
 def parse_raw_text(text):
-    pattern = re.compile(
-        r"PROJECT\s*(?:NAME)?\s*[:=-]+\s*(?P<project>[^\n\r]+)[\r\n]+"
-        r"EMPLOYEE\s*(?:NAME)?\s*[:=-]+\s*(?P<employee>[^\n\r]+)[\r\n]+"
-        r"DATE\s*[:=-]+\s*(?P<date>[^\n\r]+)[\r\n]+"
-        r"(?:SCAN\s*)?FILE\s*[:=-]+\s*(?P<files>[\d,\s]+)[\r\n]+"
-        r"(?:SCAN\s*)?PAGE\s*[:=-]+\s*(?P<pages>[\d,\s]+)",
-        re.IGNORECASE,
-    )
-
+    """
+    કોઈપણ ક્રમમાં (Project, Employee, Date, Files, Pages) લખેલ ડેટા 
+    અને પ્રોજેક્ટ નામ ન લખ્યું હોય તો પણ યોગ્ય રીતે ઓળખી લેશે.
+    """
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    
     entries = []
-    for m in pattern.finditer(text):
-        entries.append({
-            "Project": m.group("project").strip().upper(),
-            "Employee": m.group("employee").strip().upper(),
-            "Date": normalize_date(m.group("date")),
-            "Scan File": clean_int(m.group("files")),
-            "Scan Page": clean_int(m.group("pages")),
-        })
+    current_entry = {}
+    last_known_project = "DEFAULT PROJECT"
+    
+    p_proj = re.compile(r"^(?:PROJECT\s*(?:NAME)?|PRJ)\s*[:=-]+\s*(.+)$", re.IGNORECASE)
+    p_emp = re.compile(r"^(?:EMPLOYEE\s*(?:NAME)?|EMP\s*(?:NAME)?|NAME)\s*[:=-]+\s*(.+)$", re.IGNORECASE)
+    p_date = re.compile(r"^(?:DATE|DT)\s*[:=-]+\s*(.+)$", re.IGNORECASE)
+    p_file = re.compile(r"^(?:SCAN\s*)?(?:FILES?|NO\.?\s*OF\s*FILES?)\s*[:=-]+\s*([\d,\s]+)$", re.IGNORECASE)
+    p_page = re.compile(r"^(?:SCAN\s*)?(?:PAGES?|NO\.?\s*OF\s*PAGES?)\s*[:=-]+\s*([\d,\s]+)$", re.IGNORECASE)
 
-    if not entries:
-        alt_pattern = re.compile(
-            r"PROJECT\s*(?:NAME)?\s*[:=-]+\s*(?P<project>[^\n\r]+)[\r\n]+"
-            r"(?:EMPLOYEE\s*(?:NAME)?\s*[:=-]+\s*(?P<employee>[^\n\r]+)[\r\n]+)?"
-            r"DATE\s*[:=-]+\s*(?P<date>[^\n\r]+)[\r\n]+"
-            r"(?:SCAN\s*)?PAGE\s*[:=-]+\s*(?P<pages>[\d,\s]+)[\r\n]+"
-            r"(?:SCAN\s*)?FILE\s*[:=-]+\s*(?P<files>[\d,\s]+)",
-            re.IGNORECASE,
-        )
-        for m in alt_pattern.finditer(text):
-            emp = m.group("employee")
-            emp = emp.strip().upper() if emp else "UNKNOWN"
+    for line in lines:
+        m_proj = p_proj.match(line)
+        m_emp = p_emp.match(line)
+        m_date = p_date.match(line)
+        m_file = p_file.match(line)
+        m_page = p_page.match(line)
+
+        # જો નવો બ્લોક શરૂ થાય અને જૂનો ડેટા અધૂરો ન હોય તો સેવ કરવો
+        if (m_emp or m_proj) and ("Employee" in current_entry and "Date" in current_entry):
+            if "Scan File" in current_entry or "Scan Page" in current_entry:
+                if "Project" not in current_entry or not current_entry["Project"]:
+                    current_entry["Project"] = last_known_project
+                entries.append({
+                    "Project": current_entry.get("Project", last_known_project),
+                    "Employee": current_entry.get("Employee", "UNKNOWN"),
+                    "Date": current_entry.get("Date", ""),
+                    "Scan File": current_entry.get("Scan File", 0),
+                    "Scan Page": current_entry.get("Scan Page", 0)
+                })
+                current_entry = {}
+
+        if m_proj:
+            current_entry["Project"] = m_proj.group(1).strip().upper()
+            last_known_project = current_entry["Project"]
+        elif m_emp:
+            current_entry["Employee"] = m_emp.group(1).strip().upper()
+        elif m_date:
+            current_entry["Date"] = normalize_date(m_date.group(1))
+        elif m_file:
+            current_entry["Scan File"] = clean_int(m_file.group(1))
+        elif m_page:
+            current_entry["Scan Page"] = clean_int(m_page.group(1))
+
+        # જો એક જ એન્ટ્રીના બધા ફિલ્ડ ભરાઈ ગયા હોય
+        if "Employee" in current_entry and "Date" in current_entry and "Scan File" in current_entry and "Scan Page" in current_entry:
+            if "Project" not in current_entry or not current_entry["Project"]:
+                current_entry["Project"] = last_known_project
             entries.append({
-                "Project": m.group("project").strip().upper(),
-                "Employee": emp,
-                "Date": normalize_date(m.group("date")),
-                "Scan File": clean_int(m.group("files")),
-                "Scan Page": clean_int(m.group("pages")),
+                "Project": current_entry.get("Project", last_known_project),
+                "Employee": current_entry.get("Employee", "UNKNOWN"),
+                "Date": current_entry.get("Date", ""),
+                "Scan File": current_entry.get("Scan File", 0),
+                "Scan Page": current_entry.get("Scan Page", 0)
             })
+            current_entry = {}
+
+    # છેલ્લો ડેટા જો બાકી રહી ગયો હોય તો ઉમેરી દેવો
+    if current_entry.get("Employee") and current_entry.get("Date"):
+        entries.append({
+            "Project": current_entry.get("Project", last_known_project),
+            "Employee": current_entry.get("Employee", "UNKNOWN"),
+            "Date": current_entry.get("Date", ""),
+            "Scan File": current_entry.get("Scan File", 0),
+            "Scan Page": current_entry.get("Scan Page", 0)
+        })
 
     return entries
 
@@ -105,7 +138,7 @@ def generate_project_filename(records):
     year_str = "-".join(str(y) for y in years)
     month_str = months_in_order[0] if len(months_in_order) == 1 else "-".join(months_in_order)
     return f"{project_name}_{month_str}_{year_str}.xlsx"
-def generate_excel_bytes(records, rate_per_page=0.20):
+    def generate_excel_bytes(records, rate_per_page=0.20):
     df = pd.DataFrame(records)
     wb = Workbook()
 
@@ -375,8 +408,7 @@ def generate_excel_bytes(records, rate_per_page=0.20):
     wb.save(output_stream)
     output_stream.seek(0)
     return output_stream
-
-# ==================== Streamlit Web App ====================
+    # ==================== Streamlit Web App ====================
 st.set_page_config(page_title="Ajay Valiya Excel Data Entry", layout="wide", page_icon="📊")
 
 st.markdown("""
@@ -502,3 +534,4 @@ if st.session_state.master_records:
         file_name=file_name,
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+    
