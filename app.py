@@ -18,7 +18,7 @@ def clean_int(val):
     return int(s) if s else 0
 
 def normalize_date(date_str):
-    clean_d = str(date_str).strip().replace("/", "-")
+    clean_d = str(date_str).strip().replace("/", "-").replace(".", "-")
     parts = clean_d.split("-")
     if len(parts) == 3:
         try:
@@ -44,21 +44,21 @@ def parse_date_obj(date_str):
 
 def parse_raw_text(text):
     """
-    1. LOCATION / LOC ને પણ PROJECT તરીકે ગણશે.
-    2. [03/09, 18:26] જેવા વોટ્સએપ ટાઈમસ્ટેમ્પથી દરેક મેસેજ બ્લોક આપોઆપ અલગ પાડશે.
-    3. એક જ લાઈનમાં 'Name MilanRaval Date-03-09-2026' લખેલું હોય તો પણ ઓળખી લેશે.
+    1. LOCATION / LOC ને પણ PROJECT ગણે છે.
+    2. [03/09, 18:26] જેવા WhatsApp ટાઈમસ્ટેમ્પથી દરેક મેસેજ બ્લોક અલગ પાડે છે.
+    3. એક જ લાઈનમાં 'Name MilanRaval Date-03-09-2026' લખેલું હોય તો પણ ઓળખી લે છે.
     """
-    # વોટ્સએપ મેસેજ ટાઈમસ્ટેમ્પ આધારિત બ્લોક અલગ કરવા
+    # વોટ્સએપ ટાઈમસ્ટેમ્પ વડે બ્લોક અલગ કરવા
     raw_blocks = re.split(r"\[\d{1,2}/\d{1,2}(?:/\d{2,4})?,\s*[^\]]+\]", text)
     blocks = [b.strip() for b in raw_blocks if b.strip()]
     if not blocks:
         blocks = [text]
 
     entries = []
-    last_known_project = "SANAND"
+    last_known_project = "DEFAULT PROJECT"
 
-    # Regex Patterns (LOCATION / LOC ને પણ પ્રોજેક્ટમાં ગણી લેશે)
-    p_proj = re.compile(r"(?:PROJECT(?:\s*NAME)?|PRJ|LOCATION|LOC)\s*[:=-]+\s*([A-Za-z0-9_\s]+?)(?=\s+(?:EMPLOYEE|EMP|NAME|DATE|DT|FILE|PAGE)|[\r\n]|$)", re.IGNORECASE)
+    # Regex પેટર્ન (Location ને પ્રોજેક્ટ ગણવા માટે)
+    p_proj = re.compile(r"(?:PROJECT(?:\s*NAME)?|PRJ|LOCATION|LOC)\s*[:=.-]+\s*([A-Za-z0-9_\s]+?)(?=\s+(?:EMPLOYEE|EMP|NAME|DATE|DT|FILE|PAGE)|[\r\n]|$)", re.IGNORECASE)
     p_emp = re.compile(r"(?:EMPLOYEE(?:\s*NAME)?|EMP(?:\s*NAME)?|NAME)\s*[:=.-]+\s*([A-Za-z0-9_\s]+?)(?=\s+(?:PROJECT|PRJ|LOCATION|LOC|DATE|DT|FILE|PAGE)|[\r\n]|$)", re.IGNORECASE)
     p_date = re.compile(r"(?:DATE|DT)\s*[:=.-]+\s*([0-9]{1,2}[-/.][0-9]{1,2}[-/.][0-9]{2,4})", re.IGNORECASE)
     p_file = re.compile(r"(?:SCAN\s*)?(?:FILES?|NO\.?\s*OF\s*FILES?)\s*[:=.-]+\s*([\d,\s]+)", re.IGNORECASE)
@@ -66,7 +66,6 @@ def parse_raw_text(text):
 
     for block in blocks:
         entry = {}
-
         m_proj = p_proj.search(block)
         m_emp = p_emp.search(block)
         m_date = p_date.search(block)
@@ -88,7 +87,6 @@ def parse_raw_text(text):
         if m_page:
             entry["Scan Page"] = clean_int(m_page.group(1))
 
-        # જો કર્મચારીનું નામ અને તારીખ મળી જાય તો જ એન્ટ્રી ઉમેરવી
         if entry.get("Employee") and entry.get("Date"):
             entries.append({
                 "Project": entry.get("Project", last_known_project),
@@ -99,7 +97,6 @@ def parse_raw_text(text):
             })
 
     return entries
-
 
 def generate_project_filename(records):
     if not records:
@@ -116,8 +113,7 @@ def generate_project_filename(records):
     for d in parsed_dates:
         m_name = MONTH_NAMES.get(d.month, str(d.month))
         if m_name not in months_in_order:
-            months_in_order.append(m_na
-                                   me)
+            months_in_order.append(m_name)
 
     years = sorted(list(set(d.year for d in parsed_dates)))
     year_str = "-".join(str(y) for y in years)
@@ -433,7 +429,6 @@ if uploaded_file and "file_loaded" not in st.session_state:
     except Exception:
         st.sidebar.error("Master Data શીટ વાંચવામાં ભૂલ આવી.")
 
-# ==================== રેટ સેટ કરવા માટેનું અલગ સેક્શન ====================
 st.markdown("### 💰 પેજ રેટ સેટિંગ્સ")
 rate_c1, rate_c2 = st.columns([3, 1])
 with rate_c1:
@@ -454,12 +449,11 @@ with rate_c2:
 
 st.markdown("---")
 
-# ==================== વોટ્સએપ ટેક્સ્ટ ઇનપુટ ====================
 raw_input = st.text_area(
     "વોટ્સએપ રો ડેટા અહીં પેસ્ટ કરો:",
     key=f"raw_text_{st.session_state.text_counter}",
     height=250,
-    placeholder="PROJECT NAME:- NARODA\nEMPLOYEE NAME:- Kinjal\nDATE:- 01-09-2026\nSCAN FILE:- 24\nSCAN PAGE :- 2,027..."
+    placeholder="[03/09, 18:26] RAVAL MILAN SCANING: Name MilanRaval Date-03-09-2026\nFile-70\nPage- 1527\n[03/09, 18:59] RONAK SCANING 2: Location - Sanand\nDate. 03-09-2026\nName. RONAK\nPage.  1558\nFile.     50..."
 )
 
 col1, col2 = st.columns([2, 1])
